@@ -63,7 +63,7 @@ async fn predict_handler(
     let model = &state.model;
 
     match model.predict(&image_data) {
-        Ok(result) => Json(serde_json::to_value(result).unwrap()),
+        Ok(result) => Json(json!({"prediction": result})),
         Err(err) => Json(json!({ "error": err.to_string() })),
     }
 }

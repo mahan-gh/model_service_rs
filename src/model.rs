@@ -5,6 +5,8 @@ use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb};
 use serde::{Deserialize, Serialize};
 use tensorflow::{Graph, ImportGraphDefOptions, Session, SessionOptions, SessionRunArgs, Tensor};
 
+const INPUT_LAYER: &str = "x";
+const OUTPUT_LAYER: &str = "Identity";
 const IMAGE_DIMENSIONS: (u64, u64, u64) = (600, 600, 3);
 
 #[derive(Serialize, Deserialize)]
@@ -145,15 +147,21 @@ impl Model {
 
         let input_operation = self
             .graph
-            .operation_by_name("x")
+            .operation_by_name(INPUT_LAYER)
             .map_err(|_| "Failed to retrieve input operation")?
-            .ok_or("Input operation 'x:0' not found in graph")?;
+            .ok_or(format!(
+                "Input operation '{}:0' not found in graph",
+                INPUT_LAYER
+            ))?;
 
         let output_operation = self
             .graph
-            .operation_by_name("Identity")
+            .operation_by_name(OUTPUT_LAYER)
             .map_err(|_| "Failed to retrieve output operation")?
-            .ok_or("Output operation 'Identity:0' not found in graph")?;
+            .ok_or(format!(
+                "Output operation '{}:0' not found in graph",
+                OUTPUT_LAYER
+            ))?;
 
         args.add_feed(&input_operation, 0, &input_tensor);
         let output_token = args.request_fetch(&output_operation, 0);
