@@ -1,0 +1,16 @@
+services:
+  model_service_rs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: model_service_rs
+    environment:
+      - PORT=8080
+      - BODY_LIMIT_MB=5
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - MODEL_URL=${MODEL_URL}
+      - CLASS_LIST_URL=${CLASS_LIST_URL}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./model:/app/model

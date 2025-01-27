@@ -28,8 +28,8 @@ COPY --from=builder /app/target/release/model_service_rs /app/
 COPY --from=builder /app/target/release/libtensorflow*.so* /app/
 
 # Copy model files from local directory
-COPY class_list.txt /app/
-COPY frozen_graph.pb /app/
+COPY ./model/class_list.txt /app/model/
+COPY ./model/frozen_graph.pb /app/model/
 
 # Add the current directory to LD_LIBRARY_PATH
 ENV LD_LIBRARY_PATH=/app:$LD_LIBRARY_PATH

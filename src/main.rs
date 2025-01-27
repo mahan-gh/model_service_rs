@@ -9,27 +9,33 @@ use serde_json::json;
 use tokio::sync::Mutex;
 
 mod model;
-use crate::model::Model;
-
-const PORT: u16 = 8080;
+use model::Model;
+mod utils;
+use utils::{ensure_files_exist, get_env};
 
 struct AppState {
     model: Model,
 }
 
+const MODEL_PATH: &str = "./model/frozen_graph.pb";
+const CLASS_LIST_PATH: &str = "./model/class_list.txt";
+
 #[tokio::main]
 async fn main() {
-    let model = Model::new("./frozen_graph.pb", "./class_list.txt").expect("Failed to load model");
+    ensure_files_exist(MODEL_PATH, CLASS_LIST_PATH).await;
+    let (body_limit_bytes, port) = get_env();
+
+    let model = Model::new(MODEL_PATH, CLASS_LIST_PATH).expect("Failed to load model");
     let shared_state = Arc::new(Mutex::new(AppState { model }));
 
     let app = Router::new()
         .route("/predict", post(predict_handler))
-        .layer(DefaultBodyLimit::max(10 * 1024 * 1024)) // 10 MB limit
+        .layer(DefaultBodyLimit::max(body_limit_bytes))
         .with_state(shared_state)
         .route("/health", get(health_check));
 
-    println!("Listening on http://0.0.0.0:{}", PORT);
-    axum::Server::bind(&format!("0.0.0.0:{}", PORT).parse().unwrap())
+    println!("Listening on http://0.0.0.0:{}", port);
+    axum::Server::bind(&format!("0.0.0.0:{}", port).parse().unwrap())
         .serve(app.into_make_service())
         .await
         .unwrap();

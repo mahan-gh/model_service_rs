@@ -147,8 +147,6 @@ impl Model {
         img = self.resize_image_aspect_ratio(&img, IMAGE_DIMENSIONS.0 as u32);
         let padded = self.pad_to_square(&img, IMAGE_DIMENSIONS.0 as u32);
 
-        // save_image_to_folder(&padded);
-
         let mut tensor = Tensor::new(&[
             1,
             IMAGE_DIMENSIONS.0,
@@ -181,7 +179,7 @@ impl Model {
         let output_token = args.request_fetch(&self.output_layer, 0);
         self.session.run(&mut args)?;
 
-        let output_tensor: tensorflow::Tensor<f32> = args.fetch(output_token)?;
+        let output_tensor: Tensor<f32> = args.fetch(output_token)?;
         let predictions: Vec<f32> = output_tensor.to_vec();
 
         let mut prediction_result: Vec<Prediction> = predictions
@@ -210,33 +208,3 @@ impl Model {
         Ok(prediction_result)
     }
 }
-
-// use std::path::Path;
-// use std::time::{SystemTime, UNIX_EPOCH};
-
-// const PATH: &str = r"C:\Users\Mahan\Desktop\image_rs";
-
-// fn save_image_to_folder(image: &ImageBuffer<Rgb<u8>, Vec<u8>>) -> Result<(), String> {
-//     // Ensure the folder exists
-//     let folder_path = Path::new(PATH);
-//     // if let Err(e) = fs::create_dir_all(folder_path) {
-//     //     return Err(format!("Failed to create folder: {}", e));
-//     // }
-
-//     // Generate a unique filename using a timestamp
-//     let timestamp = SystemTime::now()
-//         .duration_since(UNIX_EPOCH)
-//         .map_err(|e| format!("Failed to get system time: {}", e))?
-//         .as_secs();
-//     let filename = format!("image_{}.jpg", timestamp);
-
-//     // Construct the full path for the image
-//     let file_path = folder_path.join(filename);
-
-//     // Write the image to the specified path
-//     if let Err(e) = image.save(&file_path) {
-//         return Err(format!("Failed to save image: {}", e));
-//     }
-
-//     Ok(())
-// }
