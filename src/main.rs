@@ -5,22 +5,16 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::Serialize;
 use serde_json::json;
 use tokio::sync::Mutex;
 
-use crate::model::Model;
 mod model;
+use crate::model::Model;
 
-const PORT: u16 = 3000;
+const PORT: u16 = 8080;
 
 struct AppState {
     model: Model,
-}
-
-#[derive(Serialize)]
-struct HealthCheckResponse {
-    status: String,
 }
 
 #[tokio::main]
@@ -34,8 +28,8 @@ async fn main() {
         .with_state(shared_state)
         .route("/health", get(health_check));
 
-    println!("Listening on http://127.0.0.1:{}", PORT);
-    axum::Server::bind(&format!("127.0.0.1:{}", PORT).parse().unwrap())
+    println!("Listening on http://0.0.0.0:{}", PORT);
+    axum::Server::bind(&format!("0.0.0.0:{}", PORT).parse().unwrap())
         .serve(app.into_make_service())
         .await
         .unwrap();
@@ -68,8 +62,6 @@ async fn predict_handler(
     }
 }
 
-async fn health_check() -> Json<HealthCheckResponse> {
-    Json(HealthCheckResponse {
-        status: "OK".to_string(),
-    })
+async fn health_check() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "status": "OK" }))
 }

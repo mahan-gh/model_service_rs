@@ -3,22 +3,23 @@ use std::io::Read;
 
 use image::{DynamicImage, GenericImageView, ImageBuffer, Rgb};
 use serde::{Deserialize, Serialize};
-use tensorflow::{Graph, ImportGraphDefOptions, Session, SessionOptions, SessionRunArgs, Tensor};
+use tensorflow::{
+    Graph, ImportGraphDefOptions, Operation, Session, SessionOptions, SessionRunArgs, Tensor,
+};
 
-const INPUT_LAYER: &str = "x";
-const OUTPUT_LAYER: &str = "Identity";
 const IMAGE_DIMENSIONS: (u64, u64, u64) = (600, 600, 3);
 
 #[derive(Serialize, Deserialize)]
 pub struct Prediction {
-    class: String,
+    class_label: String,
     probability: f32,
 }
 
 pub struct Model {
     session: Session,
-    graph: Graph,
     labels: Vec<String>,
+    input_layer: Operation,
+    output_layer: Operation,
 }
 
 impl Model {
@@ -37,10 +38,42 @@ impl Model {
             .map(String::from)
             .collect();
 
+        let input_layer_name = graph
+            .operation_iter()
+            .next()
+            .ok_or("No operations found in the graph")?
+            .name()
+            .map_err(|_| "Failed to retrieve the operation name")?;
+
+        println!("found {} as input layer", input_layer_name);
+
+        let input_layer = graph
+            .operation_by_name(&input_layer_name)?
+            .ok_or_else(|| format!("Output operation '{}' not found in graph", input_layer_name))?;
+
+        let output_layer_name = graph
+            .operation_iter()
+            .last()
+            .ok_or("No operations found in the graph")?
+            .name()
+            .map_err(|_| "Failed to retrieve the operation name")?;
+
+        println!("found {} as output layer", output_layer_name);
+
+        let output_layer = graph
+            .operation_by_name(&output_layer_name)?
+            .ok_or_else(|| {
+                format!(
+                    "Output operation '{}' not found in graph",
+                    output_layer_name
+                )
+            })?;
+
         Ok(Model {
             session,
-            graph,
             labels,
+            input_layer,
+            output_layer,
         })
     }
 
@@ -68,7 +101,7 @@ impl Model {
         }
     }
 
-    fn center_crop_tall_image(&self, image: DynamicImage) -> DynamicImage {
+    fn center_crop_tall_image(&self, image: &DynamicImage) -> DynamicImage {
         let (original_width, original_height) = image.dimensions();
 
         // Calculate crop height (80% of original height)
@@ -84,20 +117,13 @@ impl Model {
         target_size: u32,
     ) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
         let (width, height) = image.dimensions();
-        let mut output = ImageBuffer::new(target_size, target_size);
-
-        // Fill with black background
-        for pixel in output.pixels_mut() {
-            *pixel = image::Rgb([0, 0, 0]);
-        }
-
-        // Convert image to RGB
+        let mut output = ImageBuffer::from_pixel(target_size, target_size, image::Rgb([0, 0, 0]));
         let rgb_image = image.to_rgb8();
 
-        // Calculate centering offsets
-        let x_offset = ((target_size as i32 - width as i32) / 2).max(0) as u32;
-        let y_offset = ((target_size as i32 - height as i32) / 2).max(0) as u32;
+        let x_offset = ((target_size - width) / 2).max(0);
+        let y_offset = ((target_size - height) / 2).max(0);
 
+        // Overlay the image directly onto the pre-filled buffer
         image::imageops::overlay(&mut output, &rgb_image, x_offset as i64, y_offset as i64);
 
         output
@@ -115,24 +141,30 @@ impl Model {
 
         let (original_width, original_height) = img.dimensions();
         if original_height > 2 * original_width {
-            img = self.center_crop_tall_image(img);
+            img = self.center_crop_tall_image(&img);
         }
 
         img = self.resize_image_aspect_ratio(&img, IMAGE_DIMENSIONS.0 as u32);
         let padded = self.pad_to_square(&img, IMAGE_DIMENSIONS.0 as u32);
 
-        // Convert to tensor
-        let mut flat_img =
-            Vec::with_capacity((IMAGE_DIMENSIONS.0 * IMAGE_DIMENSIONS.1 * 3) as usize);
+        // save_image_to_folder(&padded);
 
-        for pixel in padded.pixels() {
-            flat_img.push(pixel[0] as f32);
-            flat_img.push(pixel[1] as f32);
-            flat_img.push(pixel[2] as f32);
-        }
+        let mut tensor = Tensor::new(&[
+            1,
+            IMAGE_DIMENSIONS.0,
+            IMAGE_DIMENSIONS.1,
+            IMAGE_DIMENSIONS.2,
+        ]);
 
-        let mut tensor = Tensor::new(&[1, IMAGE_DIMENSIONS.0, IMAGE_DIMENSIONS.1, 3]);
-        tensor.copy_from_slice(&flat_img);
+        tensor
+            .as_mut()
+            .chunks_mut(IMAGE_DIMENSIONS.2.try_into().unwrap())
+            .zip(padded.pixels())
+            .for_each(|(tensor_chunk, pixel)| {
+                tensor_chunk[0] = pixel[0] as f32;
+                tensor_chunk[1] = pixel[1] as f32;
+                tensor_chunk[2] = pixel[2] as f32;
+            });
 
         Ok(tensor)
     }
@@ -145,27 +177,10 @@ impl Model {
 
         let mut args = SessionRunArgs::new();
 
-        let input_operation = self
-            .graph
-            .operation_by_name(INPUT_LAYER)
-            .map_err(|_| "Failed to retrieve input operation")?
-            .ok_or(format!(
-                "Input operation '{}:0' not found in graph",
-                INPUT_LAYER
-            ))?;
-
-        let output_operation = self
-            .graph
-            .operation_by_name(OUTPUT_LAYER)
-            .map_err(|_| "Failed to retrieve output operation")?
-            .ok_or(format!(
-                "Output operation '{}:0' not found in graph",
-                OUTPUT_LAYER
-            ))?;
-
-        args.add_feed(&input_operation, 0, &input_tensor);
-        let output_token = args.request_fetch(&output_operation, 0);
+        args.add_feed(&self.input_layer, 0, &input_tensor);
+        let output_token = args.request_fetch(&self.output_layer, 0);
         self.session.run(&mut args)?;
+
         let output_tensor: tensorflow::Tensor<f32> = args.fetch(output_token)?;
         let predictions: Vec<f32> = output_tensor.to_vec();
 
@@ -174,14 +189,14 @@ impl Model {
             .enumerate()
             .filter(|(_, &prob)| (prob * 10000.0).round() > 0.0)
             .map(|(i, &prob)| {
-                let percentage = (prob * 100.0 * 100.0).round() / 100.0;
+                // let percentage = (prob * 100.0 * 100.0).round() / 100.0;
                 Prediction {
-                    class: self
+                    class_label: self
                         .labels
                         .get(i)
                         .cloned()
                         .unwrap_or_else(|| "Unknown".to_string()),
-                    probability: percentage,
+                    probability: (prob * 100.0),
                 }
             })
             .collect();
@@ -195,3 +210,33 @@ impl Model {
         Ok(prediction_result)
     }
 }
+
+// use std::path::Path;
+// use std::time::{SystemTime, UNIX_EPOCH};
+
+// const PATH: &str = r"C:\Users\Mahan\Desktop\image_rs";
+
+// fn save_image_to_folder(image: &ImageBuffer<Rgb<u8>, Vec<u8>>) -> Result<(), String> {
+//     // Ensure the folder exists
+//     let folder_path = Path::new(PATH);
+//     // if let Err(e) = fs::create_dir_all(folder_path) {
+//     //     return Err(format!("Failed to create folder: {}", e));
+//     // }
+
+//     // Generate a unique filename using a timestamp
+//     let timestamp = SystemTime::now()
+//         .duration_since(UNIX_EPOCH)
+//         .map_err(|e| format!("Failed to get system time: {}", e))?
+//         .as_secs();
+//     let filename = format!("image_{}.jpg", timestamp);
+
+//     // Construct the full path for the image
+//     let file_path = folder_path.join(filename);
+
+//     // Write the image to the specified path
+//     if let Err(e) = image.save(&file_path) {
+//         return Err(format!("Failed to save image: {}", e));
+//     }
+
+//     Ok(())
+// }

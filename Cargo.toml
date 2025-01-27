@@ -1,5 +1,5 @@
 [package]
-name = "model_service-rs"
+name = "model_service_rs"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,6 +11,3 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tensorflow = "0.21.0"
 image = "0.24.6"
-base64 = "0.21.0"
-hyper = "0.14"
-tower = "0.4"
